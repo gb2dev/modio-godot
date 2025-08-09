@@ -1,3 +1,4 @@
+use futures_util::TryStreamExt;
 use godot::classes::Node;
 use godot::prelude::*;
 
@@ -153,36 +154,40 @@ impl ModIOClient {
         tags: &Vec<&str>,
         page: usize,
         per_page: usize,
-    ) -> Result<Vec<Mod>, Box<dyn std::error::Error>> {
+    ) -> Result<(usize, Vec<Mod>), Box<dyn std::error::Error>> {
         if page < 1 {
             return Err("Page must start on 1".into());
         }
 
-        // Crear el filtro básico con paginación
-        let mut f = Filter::default().and(with_limit(per_page).offset(per_page * (page - 1)));
+        let mut f = Filter::default()
+            .and(with_limit(per_page))
+            .and(with_offset(per_page * (page - 1)));
 
-        // Agregar búsqueda por texto si el query no está vacío
         if !query.is_empty() {
             f = f.and(Fulltext::eq(query));
         }
 
-        // Agregar búsqueda por etiquetas si hay etiquetas especificadas
         if !tags.is_empty() {
             for tag in tags {
                 f = f.and(Tags::eq(*tag));
             }
         }
 
-        // Realizar la búsqueda con el filtro aplicado
-        let mods = self
+        let mut paged_stream = self
             .client
             .game(GameId::new(self.id))
             .mods()
             .search(f)
-            .collect()
+            .paged()
             .await?;
 
-        Ok(mods)
+        if let Some(page_result) = paged_stream.try_next().await? {
+            let total_pages = page_result.page_count();
+            let mods = page_result.into_data();
+            Ok((total_pages, mods))
+        } else {
+            Ok((0, vec![]))
+        }
     }
 
     async fn compress_to_zip(
@@ -343,7 +348,7 @@ impl ModIO {
         page: u16,
         per_page: u16,
         tags: PackedStringArray,
-    ) -> Array<Dictionary> {
+    ) -> Dictionary {
         if let Some(ref client) = self.client {
             // Crear una nueva tarea y ejecutarla
             let result = async {
@@ -366,18 +371,23 @@ impl ModIO {
                     )
                     .await
                 {
-                    Ok(mod_list) => {
+                    Ok((pages_count, mod_list)) => {
+                        let mut dictionary = Dictionary::new();
+                        let _ = dictionary.insert("pages_count", pages_count as u32);
+
                         let mut array = Array::new();
 
                         for mod_info in mod_list {
                             array.push(&ModIOMod::from_mod(&mod_info).to_godot());
                         }
 
-                        array
+                        let _ = dictionary.insert("mod_list", array);
+
+                        dictionary
                     }
                     Err(err) => {
                         godot_error!("Error searching mods! {:?}", err);
-                        Array::new()
+                        Dictionary::new()
                     }
                 }
             };
@@ -389,7 +399,7 @@ impl ModIO {
                 .unwrap();
             rt.block_on(result)
         } else {
-            Array::new()
+            Dictionary::new()
         }
     }
 

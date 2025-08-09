@@ -1206,6 +1206,7 @@ dependencies = [
 name = "mod_io"
 version = "0.2.0"
 dependencies = [
+ "futures-util",
  "godot",
  "image",
  "modio",
