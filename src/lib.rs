@@ -280,6 +280,29 @@ impl ModIOClient {
         }
     }
 
+    pub async fn request_security_code(
+        &self,
+        email: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let _auth = self.client.auth().request_code(email).await?;
+        
+        Ok(())
+    }
+
+    pub async fn login_with_security_code(
+        &self,
+        security_code: &str,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let auth = self.client.auth().security_code(security_code).await?;
+
+        if auth.token.is_some() {
+            let token = auth.token.ok_or("Token not found")?;
+            Ok(token.value)
+        } else {
+            Err("Failed to login with Steam".into())
+        }
+    }
+
     async fn update_mod(
         &self,
         mod_id: u64,
@@ -492,6 +515,43 @@ impl ModIO {
                     Ok(api_key) => api_key.to_godot(),
                     Err(err) => {
                         godot_print!("Error logging in with Steam: {:?}", err);
+                        "".to_godot()
+                    }
+                }
+            };
+
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(result)
+        } else {
+            "".to_godot()
+        }
+    }
+
+    #[func]
+    fn request_security_code(&self, email: GString) {
+        if let Some(ref client) = self.client {
+            let result = async {
+                if let Err(err) = client.request_security_code(&email.to_string()).await {
+                    godot_print!("Error requesting security code: {:?}", err);
+                }
+            };
+
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(result)
+        }
+    }
+
+    #[func]
+    fn login_with_security_code(&self, security_code: GString) -> GString {
+        if let Some(ref client) = self.client {
+            let result = async {
+                match client
+                    .login_with_security_code(&security_code.to_string())
+                    .await
+                {
+                    Ok(api_key) => api_key.to_godot(),
+                    Err(err) => {
+                        godot_print!("Error logging in with security code: {:?}", err);
                         "".to_godot()
                     }
                 }
