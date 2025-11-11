@@ -227,29 +227,29 @@ impl ModIOClient {
         summary: &str,
         user_token: &str,
         thumbnail_path: &str,
+        tags: &Vec<String>,
     ) -> Result<String, Box<dyn std::error::Error>> {
         let zip_path = modfile_path.to_owned() + ".zip";
         Self::compress_to_zip(modfile_path, &zip_path).await?;
-
         let thumbnail = read(thumbnail_path).await?;
         let img = image::open(thumbnail_path)?;
-
         if img.width() * 9 != img.height() * 16 || img.width() < 512 || img.height() < 288 {
             return Err("Thumbnail must be 16:9 and at least 512x288".into());
         }
-
         if thumbnail.len() > 8 * 1024 * 1024 {
             return Err("Thumbnail must be less than 8MB".into());
         }
-
         let user_client = self
             .client
             .with_credentials(Credentials::with_token(self.game_api.as_str(), user_token));
 
+        let mut add_options = AddModOptions::new(name, thumbnail_path, summary);
+        add_options = add_options.tags(tags.as_slice());
+
         let new_mod = user_client
             .game(GameId::new(self.id))
             .mods()
-            .add(AddModOptions::new(name, thumbnail_path, summary))
+            .add(add_options)
             .await?;
 
         user_client
@@ -285,7 +285,7 @@ impl ModIOClient {
         email: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let _auth = self.client.auth().request_code(email).await?;
-        
+
         Ok(())
     }
 
@@ -434,6 +434,7 @@ impl ModIO {
         name: GString,
         summary: GString,
         thumbnail_path: GString,
+        tags: PackedStringArray,
     ) -> GString {
         if let Some(ref client) = self.client {
             // Create a new task and execute it
@@ -445,6 +446,7 @@ impl ModIO {
                         &summary.to_string(),
                         &user_token.to_string(),
                         &thumbnail_path.to_string(),
+                        &tags.as_slice().iter().map(|s| s.to_string()).collect(),
                     )
                     .await
                 {
